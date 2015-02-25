@@ -1,11 +1,17 @@
 package dbmetamodel
 
+import (
+	"net/url"
+	"regexp"
+	"strconv"
+)
+
 type LimitQueryPart struct {
-	LimitTo int
+	LimitTo uint64
 }
 
 type SkipQueryPart struct {
-	SkipOver int
+	SkipOver uint64
 }
 
 type OrderQueryPart struct {
@@ -23,8 +29,12 @@ type FindByIdQuery struct {
 	ModelId string
 }
 
+type FieldsQueryPart struct {
+	Included []string
+	Excluded []string
+}
 type FindQuery struct {
-	Fields []string
+	Fields *FieldsQueryPart
 
 	Where   []*WhereQueryPart
 	OrderBy []*OrderQueryPart
@@ -78,8 +88,71 @@ type QueryBuilder interface {
 	BuildUpdateQuery(query UpdateQuery, tableMetaData *Table) (string, error)
 }
 
-type UrlParser struct {
+type UrlParser interface {
+	ParseUrlFieldsFilterPart(fields *FieldsQueryPart, queryString string) error
+
+	ParseUrlLimitFilterPart(limit *LimitQueryPart, queryString string) error
+
+	ParseUrlSkipFilterPart(skip *SkipQueryPart, queryString string) error
+
+	ParseUrlOrderFilterPart(order *OrderQueryPart, queryString string) error
+
+	ParseWhereFilterPart(where []*WhereQueryPart, queryString string) error
+
+	//ParseIncludeFilterPart(queryString string)
 }
 
-type BodyParser struct {
+type QueryStringUrlParser struct {
+	limitRegex *regexp.Regexp
+	skipRegex  *regexp.Regexp
+}
+
+func (parser *QueryStringUrlParser) ParseUrlFieldsFilterPart(fields *FieldsQueryPart, queryString url.Values) error {
+	return nil
+}
+
+func (parser *QueryStringUrlParser) ParseUrlLimitFilterPart(limit *LimitQueryPart, queryString url.Values) error {
+	for k, _ := range queryString {
+		if parser.limitRegex.MatchString(k) {
+
+			// we have a limit query part
+			limitTo, err := strconv.ParseUint(queryString.Get(k), 10, 64)
+			if err != nil {
+				return err
+			}
+			limit = &LimitQueryPart{
+				LimitTo: limitTo,
+			}
+			return nil
+		}
+	}
+
+	return nil
+}
+
+func (parser *QueryStringUrlParser) ParseUrlSkipFilterPart(skip *SkipQueryPart, queryString url.Values) error {
+	for k, _ := range queryString {
+		if parser.skipRegex.MatchString(k) {
+
+			// we have a skip query part
+			skipBy, err := strconv.ParseUint(queryString.Get(k), 10, 64)
+			if err != nil {
+				return err
+			}
+			skip = &SkipQueryPart{
+				SkipOver: skipBy,
+			}
+			return nil
+		}
+	}
+
+	return nil
+}
+
+func (parser *QueryStringUrlParser) ParseUrlOrderFilterPart(order *OrderQueryPart, queryString url.Values) error {
+	return nil
+}
+
+func (parser *QueryStringUrlParser) ParseWhereFilterPart(where []*WhereQueryPart, queryString url.Values) error {
+	return nil
 }
