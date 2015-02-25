@@ -1,9 +1,12 @@
 package dbmetamodel
 
 import (
+	"errors"
+	"fmt"
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 type LimitQueryPart struct {
@@ -14,9 +17,13 @@ type SkipQueryPart struct {
 	SkipOver uint64
 }
 
-type OrderQueryPart struct {
+type OrderQueryPartItem struct {
 	FieldName string
 	Direction string
+}
+
+type OrderQueryPart struct {
+	OrderBy []*OrderQueryPartItem
 }
 
 type WhereQueryPart struct {
@@ -25,19 +32,33 @@ type WhereQueryPart struct {
 	Value     string
 }
 
-type FindByIdQuery struct {
-	ModelId string
-}
-
 type FieldsQueryPart struct {
 	Included []string
 	Excluded []string
 }
-type FindQuery struct {
-	Fields *FieldsQueryPart
 
+type IncludeQueryPart struct {
+}
+
+type FindByIdQuery struct {
+	ModelId string
+
+	Fields *FieldsQueryPart
+}
+
+type FindOneQuery struct {
+	Fields  *FieldsQueryPart
+	Include []*IncludeQueryPart
 	Where   []*WhereQueryPart
-	OrderBy []*OrderQueryPart
+	OrderBy *OrderQueryPart
+	Skip    *SkipQueryPart
+}
+
+type FindQuery struct {
+	Fields  *FieldsQueryPart
+	Include []*IncludeQueryPart
+	Where   []*WhereQueryPart
+	OrderBy *OrderQueryPart
 	Limit   *LimitQueryPart
 	Skip    *SkipQueryPart
 }
@@ -64,11 +85,15 @@ type ExistsQuery struct {
 	ModelId string
 }
 
-type DeleteByIdQuery struct {
+type DestroyByIdQuery struct {
 	ModelId string
 }
 
-type QueryBuilder interface {
+type DestroyQuery struct {
+	Where []*WhereQueryPart
+}
+
+type SqlQueryBuilder interface {
 	BuildFindByIdQuery(query FindByIdQuery, tableMetaData *Table) (string, error)
 
 	BuildFindQuery(query FindQuery, tableMetaData *Table) (string, error)
@@ -81,78 +106,215 @@ type QueryBuilder interface {
 
 	BuildInsertQuery(query InsertQuery, tableMetaData *Table) (string, error)
 
-	BuildDeleteByIdQuery(query DeleteByIdQuery, tableMetaData *Table) (string, error)
+	BuildDestroyByIdQuery(query DestroyByIdQuery, tableMetaData *Table) (string, error)
+
+	BuildDestroyQuery(query DestroyQuery, tableMetaData *Table) (string, error)
 
 	BuildUpdateByIdQuery(query UpdateByIdQuery, tableMetaData *Table) (string, error)
 
 	BuildUpdateQuery(query UpdateQuery, tableMetaData *Table) (string, error)
 }
 
-type UrlParser interface {
-	ParseUrlFieldsFilterPart(fields *FieldsQueryPart, queryString string) error
+type QueryUrlParser interface {
+	ParseFindByIdQueryString(findByIdQuery *FindByIdQuery, queryString url.Values) error
 
-	ParseUrlLimitFilterPart(limit *LimitQueryPart, queryString string) error
+	ParseFindQueryString(findQuery *FindQuery, queryString url.Values) error
 
-	ParseUrlSkipFilterPart(skip *SkipQueryPart, queryString string) error
+	ParseFindOneQueryString(findOneQuery *FindOneQuery, queryString url.Values) error
+}
 
-	ParseUrlOrderFilterPart(order *OrderQueryPart, queryString string) error
+type FilterUrlParser interface {
+	ParseUrlFieldsFilterPart(filterString string, filterValueString string) (fields *FieldsQueryPart, err error)
 
-	ParseWhereFilterPart(where []*WhereQueryPart, queryString string) error
+	ParseUrlLimitFilterPart(filterString string, filterValueString string) (limit *LimitQueryPart, err error)
 
-	//ParseIncludeFilterPart(queryString string)
+	ParseUrlSkipFilterPart(filterString string, filterValueString string) (skip *SkipQueryPart, err error)
+
+	ParseUrlOrderFilterPart(filterString string, filterValueString string) (order *OrderQueryPart, err error)
+
+	ParseUrlWhereFilterPart(filterString string, filterValueString string) (where []*WhereQueryPart, err error)
 }
 
 type QueryStringUrlParser struct {
-	limitRegex *regexp.Regexp
-	skipRegex  *regexp.Regexp
+	filterTypeRegex    *regexp.Regexp
+	limitFilterRegex   *regexp.Regexp
+	skipFilterRegex    *regexp.Regexp
+	orderByFilterRegex *regexp.Regexp
+	orderByValueRegex  *regexp.Regexp
 }
 
-func (parser *QueryStringUrlParser) ParseUrlFieldsFilterPart(fields *FieldsQueryPart, queryString url.Values) error {
-	return nil
+func NewQueryStringUrlParser() *QueryStringUrlParser {
+	parser := QueryStringUrlParser{
+		filterTypeRegex:    regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*(?P<filterType>\\w*)\\s*\\]\\s*$"),
+		limitFilterRegex:   regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*limit\\s*\\]\\s*$"),
+		skipFilterRegex:    regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*skip\\s*\\]\\s*$"),
+		orderByFilterRegex: regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*order\\s*\\]\\s*$"),
+		orderByValueRegex:  regexp.MustCompile("(?i)(?P<fieldName>\\w*)\\s*(?P<direction>ASC|DESC)"),
+	}
+
+	return &parser
 }
 
-func (parser *QueryStringUrlParser) ParseUrlLimitFilterPart(limit *LimitQueryPart, queryString url.Values) error {
-	for k, _ := range queryString {
-		if parser.limitRegex.MatchString(k) {
+func getFilterType(regex *regexp.Regexp, queryStringPart string) (isFilter bool, filterType string) {
+	// check if the queryStringPart is a filter
+	if regex.MatchString(queryStringPart) {
+		n1 := regex.SubexpNames()
+		r2 := regex.FindAllStringSubmatch(queryStringPart, -1)[0]
 
-			// we have a limit query part
-			limitTo, err := strconv.ParseUint(queryString.Get(k), 10, 64)
-			if err != nil {
-				return err
+		md := map[string]string{}
+		for i, n := range r2 {
+			md[n1[i]] = n
+		}
+
+		// return the filter type found
+		filterType := md["filterType"]
+
+		return true, strings.ToLower(filterType)
+	}
+	return false, ""
+}
+
+func (parser *QueryStringUrlParser) ParseFindByIdQueryString(findByIdQuery *FindByIdQuery, queryString url.Values) (err error) {
+	for queryStringPart, values := range queryString {
+		// get the filter type
+		isFilter, filterType := getFilterType(parser.filterTypeRegex, queryStringPart)
+
+		if isFilter {
+			for _, value := range values {
+				switch filterType {
+				case "fields":
+					findByIdQuery.Fields, err = parser.ParseUrlFieldsFilterPart(queryStringPart, value)
+					break
+				default:
+					return errors.New(filterType + " is not a valid filter for a findByIdQuery")
+				}
 			}
-			limit = &LimitQueryPart{
-				LimitTo: limitTo,
-			}
-			return nil
 		}
 	}
 
 	return nil
 }
 
-func (parser *QueryStringUrlParser) ParseUrlSkipFilterPart(skip *SkipQueryPart, queryString url.Values) error {
-	for k, _ := range queryString {
-		if parser.skipRegex.MatchString(k) {
+func (parser *QueryStringUrlParser) ParseFindQueryString(findQuery *FindQuery, queryString url.Values) (err error) {
+	for queryStringPart, values := range queryString {
+		// get the filter type
+		isFilter, filterType := getFilterType(parser.filterTypeRegex, queryStringPart)
 
-			// we have a skip query part
-			skipBy, err := strconv.ParseUint(queryString.Get(k), 10, 64)
-			if err != nil {
-				return err
+		if isFilter {
+			fmt.Println(filterType)
+			for _, value := range values {
+				switch filterType {
+				case "fields":
+					findQuery.Fields, err = parser.ParseUrlFieldsFilterPart(queryStringPart, value)
+					break
+				case "where":
+					findQuery.Where, err = parser.ParseUrlWhereFilterPart(queryStringPart, value)
+					break
+				case "order":
+					findQuery.OrderBy, err = parser.ParseUrlOrderFilterPart(queryStringPart, value)
+					break
+				case "limit":
+					findQuery.Limit, err = parser.ParseUrlLimitFilterPart(queryStringPart, value)
+					break
+				case "skip":
+					findQuery.Skip, err = parser.ParseUrlSkipFilterPart(queryStringPart, value)
+					break
+				default:
+					return errors.New(filterType + " is not a valid filter for a findQuery")
+				}
 			}
-			skip = &SkipQueryPart{
-				SkipOver: skipBy,
-			}
-			return nil
 		}
 	}
 
 	return nil
 }
 
-func (parser *QueryStringUrlParser) ParseUrlOrderFilterPart(order *OrderQueryPart, queryString url.Values) error {
+func (parser *QueryStringUrlParser) ParseFindOneQueryString(findOneQuery *FindOneQuery, queryString url.Values) error {
 	return nil
 }
 
-func (parser *QueryStringUrlParser) ParseWhereFilterPart(where []*WhereQueryPart, queryString url.Values) error {
-	return nil
+func (parser *QueryStringUrlParser) ParseUrlFieldsFilterPart(filterString string, filterValueString string) (fields *FieldsQueryPart, err error) {
+	return nil, nil
+}
+
+func (parser *QueryStringUrlParser) ParseUrlLimitFilterPart(filterString string, filterValueString string) (limit *LimitQueryPart, err error) {
+	if parser.limitFilterRegex.MatchString(filterString) {
+
+		// we have a limit query part
+		limitTo, err := strconv.ParseUint(filterValueString, 10, 64)
+
+		if err != nil {
+			return nil, errors.New("Error parsing the value for the limit filter, it is not a valid integer.\n" + err.Error())
+		}
+		limit = &LimitQueryPart{
+			LimitTo: limitTo,
+		}
+
+		return limit, nil
+	}
+
+	return nil, nil
+}
+
+func (parser *QueryStringUrlParser) ParseUrlSkipFilterPart(filterString string, filterValueString string) (skip *SkipQueryPart, err error) {
+
+	if parser.skipFilterRegex.MatchString(filterString) {
+
+		// we have a skip query part
+		skipBy, err := strconv.ParseUint(filterValueString, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		skip = &SkipQueryPart{
+			SkipOver: skipBy,
+		}
+
+		return skip, nil
+	}
+
+	return nil, nil
+}
+
+func (parser *QueryStringUrlParser) ParseUrlOrderFilterPart(filterString string, filterValueString string) (order *OrderQueryPart, err error) {
+	if parser.orderByFilterRegex.MatchString(filterString) {
+
+		// we have an order query part
+		if parser.orderByValueRegex.MatchString(filterValueString) {
+			n1 := parser.orderByValueRegex.SubexpNames()
+			r2 := parser.orderByValueRegex.FindAllStringSubmatch(filterValueString, -1)
+
+			orderItems := []*OrderQueryPartItem{}
+			for _, v := range r2 {
+
+				md := map[string]string{}
+				for i, n := range v {
+					md[n1[i]] = n
+				}
+
+				fieldName := md["fieldName"]
+				direction := md["direction"]
+
+				fmt.Println(md)
+
+				orderItems = append(orderItems, &OrderQueryPartItem{
+					FieldName: fieldName,
+					Direction: strings.ToLower(direction),
+				})
+			}
+
+			if len(orderItems) > 0 {
+				order = &OrderQueryPart{
+					OrderBy: orderItems,
+				}
+			}
+		}
+
+		return order, nil
+	}
+
+	return nil, nil
+}
+
+func (parser *QueryStringUrlParser) ParseUrlWhereFilterPart(filterString string, filterValueString string) (where []*WhereQueryPart, err error) {
+	return nil, nil
 }
