@@ -141,6 +141,7 @@ type QueryStringUrlParser struct {
 	skipFilterRegex    *regexp.Regexp
 	orderByFilterRegex *regexp.Regexp
 	orderByValueRegex  *regexp.Regexp
+	whereFilterRegex   *regexp.Regexp
 }
 
 func NewQueryStringUrlParser() *QueryStringUrlParser {
@@ -150,6 +151,8 @@ func NewQueryStringUrlParser() *QueryStringUrlParser {
 		skipFilterRegex:    regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*skip\\s*\\]\\s*$"),
 		orderByFilterRegex: regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*order\\s*\\]\\s*$"),
 		orderByValueRegex:  regexp.MustCompile("(?i)(?P<fieldName>\\w*)\\s*(?P<direction>ASC|DESC)"),
+		whereFilterRegex:   regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*where\\s*\\]\\s*"),
+		//^(?i)\s*filter\s*\[\s*where\s*\]\s*\[\s*(?<fieldName>\w*)\s*\]\s*\[\s*(?<operation>\w*)\s*\]\s*$
 	}
 
 	return &parser
