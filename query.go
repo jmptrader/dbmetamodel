@@ -136,23 +136,26 @@ type FilterUrlParser interface {
 }
 
 type QueryStringUrlParser struct {
-	filterTypeRegex    *regexp.Regexp
-	limitFilterRegex   *regexp.Regexp
-	skipFilterRegex    *regexp.Regexp
-	orderByFilterRegex *regexp.Regexp
-	orderByValueRegex  *regexp.Regexp
-	whereFilterRegex   *regexp.Regexp
+	filterTypeRegex      *regexp.Regexp
+	limitFilterRegex     *regexp.Regexp
+	skipFilterRegex      *regexp.Regexp
+	orderByFilterRegex   *regexp.Regexp
+	orderByValueRegex    *regexp.Regexp
+	whereFilterRegex     *regexp.Regexp
+	whereValueRegex      *regexp.Regexp
+	whereAndOrValueRegex *regexp.Regexp
 }
 
 func NewQueryStringUrlParser() *QueryStringUrlParser {
 	parser := QueryStringUrlParser{
-		filterTypeRegex:    regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*(?P<filterType>\\w*)\\s*\\]\\s*$"),
-		limitFilterRegex:   regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*limit\\s*\\]\\s*$"),
-		skipFilterRegex:    regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*skip\\s*\\]\\s*$"),
-		orderByFilterRegex: regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*order\\s*\\]\\s*$"),
-		orderByValueRegex:  regexp.MustCompile("(?i)(?P<fieldName>\\w*)\\s*(?P<direction>ASC|DESC)"),
-		whereFilterRegex:   regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*where\\s*\\]\\s*"),
-		//^(?i)\s*filter\s*\[\s*where\s*\]\s*\[\s*(?<fieldName>\w*)\s*\]\s*\[\s*(?<operation>\w*)\s*\]\s*$
+		filterTypeRegex:      regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*(?P<filterType>\\w*)\\s*\\]\\s*$"),
+		limitFilterRegex:     regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*limit\\s*\\]\\s*$"),
+		skipFilterRegex:      regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*skip\\s*\\]\\s*$"),
+		orderByFilterRegex:   regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*order\\s*\\]\\s*$"),
+		orderByValueRegex:    regexp.MustCompile("(?i)(?P<fieldName>\\w*)\\s*(?P<direction>ASC|DESC)"),
+		whereFilterRegex:     regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*where\\s*\\]\\s*"),
+		whereValueRegex:      regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*where\\s*\\]\\s*\\[\\s*(?<fieldName>\\w*)\\s*\\]\\s*(?:\\[\\s*(?<operation>\\w*)\\s*\\])?\\s*(?:\\[\\s*(?<order>\\d*)\\s*\\])?\\s*$"),
+		whereAndOrValueRegex: regexp.MustCompile("^(?i)\\s*filter\\s*\\[\\s*where\\s*\\]\\s*\\[\\s*(?<operation>\\w*)\\s*\\]\\s*(?:\\[\\s*(?<order>\\d*)\\s*\\])?\\s*(?:\\[\\s*(?<fieldName>\\w*)\\s*\\])?\\s*$"),
 	}
 
 	return &parser
